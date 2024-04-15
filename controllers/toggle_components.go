@@ -1170,7 +1170,7 @@ func (r *MultiClusterEngineReconciler) CheckConsole(ctx context.Context) (bool, 
 	}
 	// -0 allows for prerelease builds to pass the validation.
 	// If -0 is removed, developer/rc builds will not pass this check
-	//OCP Console can only be disabled in OCP 4.12+
+	// OCP Console can only be disabled in OCP 4.12+
 	constraint, err := semver.NewConstraint(">= 4.12.0-0")
 	if err != nil {
 		return false, fmt.Errorf("failed to set ocp version constraint: %w", err)

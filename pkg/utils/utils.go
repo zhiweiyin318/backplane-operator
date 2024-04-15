@@ -4,6 +4,12 @@ package utils
 
 import (
 	"encoding/json"
+	"fmt"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/rest"
+
 	"os"
 
 	backplanev1 "github.com/stolostron/backplane-operator/api/v1"
@@ -53,10 +59,23 @@ var offComponents = []string{
 	backplanev1.ImageBasedInstallOperator,
 }
 
+var nonOCPComponents = []string{
+	backplanev1.ClusterManager,
+	backplanev1.ServerFoundation,
+	backplanev1.HyperShift,
+	backplanev1.HypershiftLocalHosting,
+	backplanev1.LocalCluster,
+}
+var GlobalDeployOnOCP = true
+
 // SetDefaultComponents returns true if changes are made
 func SetDefaultComponents(m *backplanev1.MultiClusterEngine) bool {
+	components := onComponents
+	if !DeployOnOCP() {
+		components = nonOCPComponents
+	}
 	updated := false
-	for _, c := range onComponents {
+	for _, c := range components {
 		if !m.ComponentPresent(c) {
 			m.Enable(c)
 			updated = true
@@ -295,4 +314,42 @@ func GetHubType(mce *backplanev1.MultiClusterEngine) string {
 			return string(HubTypeMCE)
 		}
 	}
+}
+
+func SetDeployOnOCP(v bool) {
+	GlobalDeployOnOCP = v
+}
+
+func DeployOnOCP() bool {
+	return GlobalDeployOnOCP
+}
+
+var projectGVR = schema.GroupVersionResource{Group: "project.openshift.io", Version: "v1", Resource: "projects"}
+
+func DetectOpenShift(kubeConfig *rest.Config) error {
+	discoveryClient, err := discovery.NewDiscoveryClientForConfig(kubeConfig)
+	if err != nil {
+		return err
+	}
+
+	_, err = discoveryClient.ServerResourcesForGroupVersion(projectGVR.GroupVersion().String())
+	if err != nil {
+		if errors.IsNotFound(err) {
+			fmt.Println("### The operator is running on non-OCP ###")
+			SetDeployOnOCP(false)
+			return nil
+		}
+
+		return err
+	}
+	return nil
+}
+
+func ComponentOnNonOCP(name string) bool {
+	for _, component := range nonOCPComponents {
+		if name == component {
+			return true
+		}
+	}
+	return false
 }

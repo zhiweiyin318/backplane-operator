@@ -1,3 +1,4 @@
+{{- if eq .Values.global.deployOnOCP "true" }}
 kind: Service
 apiVersion: v1
 metadata:
@@ -13,3 +14,4 @@ spec:
   type: ClusterIP
   selector:
     app: managedcluster-import-controller-v2
+{{- end }}

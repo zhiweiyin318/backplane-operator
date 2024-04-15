@@ -1,3 +1,4 @@
+{{- if eq .Values.global.deployOnOCP "true" }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -117,9 +118,11 @@ spec:
 {{- end }}
       securityContext:
         runAsNonRoot: true
+        {{- if eq .Values.global.deployOnOCP "true" }}
         {{- if semverCompare ">=4.11.0" .Values.hubconfig.ocpVersion }}
         seccompProfile:
           type: RuntimeDefault
+        {{- end }}
         {{- end }}
       serviceAccountName: ocm-foundation-sa
       volumes:
@@ -131,3 +134,4 @@ spec:
         configMap:
           defaultMode: 420
           name: openshift-service-ca.crt
+  {{- end }}
