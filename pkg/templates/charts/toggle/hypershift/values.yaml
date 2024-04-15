@@ -9,6 +9,7 @@ global:
   templateOverrides: {}
   namespace: default
   pullSecret: null
+  deployOnOCP: ""
 hubconfig:
   nodeSelector: null
   proxyConfigs: {}

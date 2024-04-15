@@ -40,6 +40,7 @@ type Global struct {
 	PullSecret        string            `json:"pullSecret" structs:"pullSecret"`
 	Namespace         string            `json:"namespace" structs:"namespace"`
 	ConfigSecret      string            `json:"configSecret" structs:"configSecret"`
+	DeployOnOCP       string            `json:"deployOnOCP" structs:"deployOnOCP"`
 }
 
 type HubConfig struct {
@@ -80,7 +81,7 @@ func (u *Toleration) MarshalJSON() ([]byte, error) {
 	var operator corev1.TolerationOperator = u.Operator
 	var effect corev1.TaintEffect = u.Effect
 
-	//Marshal all Toleration fields that are a number or true/false into a string
+	// Marshal all Toleration fields that are a number or true/false into a string
 	for i := 0; i < reflect.Indirect(v).NumField(); i++ {
 		switch reflect.Indirect(v).Field(i).Kind() {
 		case reflect.String:
@@ -314,6 +315,10 @@ func injectValuesOverrides(values *Values, backplaneConfig *v1.MultiClusterEngin
 	values.Global.Namespace = backplaneConfig.Spec.TargetNamespace
 
 	values.Global.PullSecret = backplaneConfig.Spec.ImagePullSecret
+
+	if utils.DeployOnOCP() {
+		values.Global.DeployOnOCP = "true"
+	}
 
 	if v1.IsInHostedMode(backplaneConfig) {
 		secretNN, err := utils.GetHostedCredentialsSecret(backplaneConfig)
