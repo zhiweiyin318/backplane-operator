@@ -25,7 +25,12 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"github.com/stolostron/backplane-operator/controllers/webhookcert"
+	"github.com/stolostron/backplane-operator/pkg/servingcert"
+	"k8s.io/client-go/informers"
+	"k8s.io/client-go/kubernetes"
 	"os"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"time"
 
 	operatorsapiv2 "github.com/operator-framework/api/pkg/operators/v2"
@@ -222,7 +227,7 @@ func main() {
 	// the operator can be upgraded stays within the mce controller.
 	setupLog.Info("Setting OperatorCondition.")
 	upgradeableCondition, err := utils.NewOperatorCondition(uncachedClient, operatorsapiv2.Upgradeable)
-	ctx := context.Background()
+	ctx := ctrl.SetupSignalHandler()
 
 	if err != nil {
 		setupLog.Error(err, "Cannot create the Upgradeable Operator Condition")
@@ -243,6 +248,57 @@ func main() {
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MultiClusterEngine")
 		os.Exit(1)
+	}
+
+	if !utils.DeployOnOCP() {
+		deploymentNamespace, ok := os.LookupEnv("POD_NAMESPACE")
+		if !ok {
+			setupLog.Info("Failing due to being unable to locate webhook service namespace")
+			os.Exit(1)
+		}
+
+		kubeClient, err := kubernetes.NewForConfig(ctrl.GetConfigOrDie())
+		if err != nil {
+			setupLog.Error(err, "unable to new kubeClient")
+			os.Exit(1)
+		}
+
+		// only cache the resources in deployment namespace to avoid consume large mem.
+		informerFactory := informers.NewSharedInformerFactoryWithOptions(kubeClient, 10*time.Minute, informers.WithNamespace(deploymentNamespace))
+
+		certGenerator := servingcert.CertGenerator{
+			Namespace:             deploymentNamespace,
+			CaBundleConfigmapName: webhookcert.CaBundleConfigmapName,
+			SigningKeySecretName:  webhookcert.SigningKeySecretName,
+			SignerNamePrefix:      webhookcert.SignerNamePrefix,
+			ConfigmapLister:       informerFactory.Core().V1().ConfigMaps().Lister(),
+			SecretLister:          informerFactory.Core().V1().Secrets().Lister(),
+			Client:                kubeClient,
+			EventRecorder:         servingcert.NewEventRecorder(kubeClient, "multicluster-engine-operator", deploymentNamespace),
+		}
+
+		if err = (&webhookcert.Reconciler{
+			Namespace:     deploymentNamespace,
+			CertGenerator: certGenerator,
+			Log:           log.Log.WithName(webhookcert.ControllerName),
+		}).SetupWithManager(mgr, informerFactory.Core().V1().ConfigMaps().Informer(), informerFactory.Core().V1().Secrets().Informer()); err != nil {
+			setupLog.Error(err, "unable to create webhook cert controller", "controller", "MultiClusterEngine")
+			os.Exit(1)
+		}
+
+		informerFactory.Start(ctx.Done())
+		informerFactory.WaitForCacheSync(ctx.Done())
+
+		err = certGenerator.GenerateWebhookCertKey(ctx, webhookcert.MCEWebhookCertSecretName, webhookcert.MCEWebhookServiceName)
+		if err != nil {
+			setupLog.Error(err, "unable to generate mce webhook cert")
+			os.Exit(1)
+		}
+		err = certGenerator.DumpCertSecret(ctx, webhookcert.MCEWebhookCertSecretName, webhookcert.MCEWebhookCertDir)
+		if err != nil {
+			setupLog.Error(err, "unable to dump webhook cert secret")
+			os.Exit(1)
+		}
 	}
 
 	// Render CRD templates
@@ -309,7 +365,7 @@ func main() {
 	}
 
 	setupLog.Info("starting manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err := mgr.Start(ctx); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
@@ -376,6 +432,26 @@ func ensureWebhooks(k8sClient client.Client) error {
 				UID:        owner.UID,
 			},
 		})
+
+		if !utils.DeployOnOCP() {
+			caBundleConfigmapKey := types.NamespacedName{Name: webhookcert.CaBundleConfigmapName, Namespace: deploymentNamespace}
+			caBundleConfigmap := &corev1.ConfigMap{}
+			if err := k8sClient.Get(context.TODO(), caBundleConfigmapKey, caBundleConfigmap); err != nil {
+				setupLog.Error(err, "Failed to get cabundle configmap")
+				time.Sleep(5 * time.Second)
+				continue
+			}
+			cb := caBundleConfigmap.Data["ca-bundle.crt"]
+			if len(cb) == 0 {
+				setupLog.Error(fmt.Errorf("failed to get cabundle from the configmap"), "")
+				time.Sleep(5 * time.Second)
+				continue
+			}
+
+			for key, _ := range validatingWebhook.Webhooks {
+				validatingWebhook.Webhooks[key].ClientConfig.CABundle = []byte(cb)
+			}
+		}
 
 		existingWebhook := &admissionregistration.ValidatingWebhookConfiguration{}
 		existingWebhook.SetGroupVersionKind(schema.GroupVersionKind{
