@@ -127,7 +127,7 @@ docker-build: test ## Build docker image with the manager.
 docker-push: ## Push docker image with the manager.
 	docker push ${IMG}
 
-podman-build: test ## Build podman image with the manager.
+podman-build:  ## Build podman image with the manager.
 	podman build --build-arg LDFLAGS=${LDFLAGS} -t ${IMG} .
 
 podman-push: ## Push podman image with the manager.

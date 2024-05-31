@@ -112,11 +112,14 @@ spec:
       nodeSelector:
 {{ toYaml . | indent 8 }}
 {{- end }}
+
+{{- if eq .Values.global.deployOnOCP "true" }}
       securityContext:
         runAsNonRoot: true
 {{- if semverCompare ">=4.11.0" .Values.hubconfig.ocpVersion }}
         seccompProfile:
           type: RuntimeDefault
+{{- end }}
 {{- end }}
       serviceAccountName: assisted-service
       terminationGracePeriodSeconds: 10
